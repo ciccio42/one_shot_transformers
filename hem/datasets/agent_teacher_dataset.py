@@ -18,25 +18,33 @@ class AgentTeacherDataset(Dataset):
         agent_files = get_files(agent_dir)
         teacher_files = get_files(teacher_dir)
         assert len(agent_files) == len(teacher_files)
+        # order, list that contains the indeces to the files in the agent_files list for creating the training or validation partition
         order = split_files(len(agent_files), split, mode)
 
         self._pairs = []
-        file_2_o = {order[i]:i for i in range(len(order))}
+        # file_2_o is a dictonary that links the file index with the dataset partition index
+        file_2_o = {order[i]: i for i in range(len(order))}
+        # for each file in the partition
         for i in range(len(order)):
+            # compute the task index
             traj_ind = int(order[i] // traj_per_task)
             for t in range(traj_per_task):
                 t = t + traj_ind * traj_per_task
                 if t in file_2_o:
+                    # (agent, teacher) tuple
+                    # for each agent are associated at most traj_per_task teacher files
                     self._pairs.append((i, file_2_o[t]))
 
-        self._agent_dataset = AgentDemonstrations(files=[agent_files[o] for o in order], T_context=agent_context, **params)
-        self._teacher_dataset = TeacherDemonstrations(files=[teacher_files[o] for o in order], T_context=teacher_context, **params)
+        self._agent_dataset = AgentDemonstrations(
+            files=[agent_files[o] for o in order], T_context=agent_context, **params)
+        self._teacher_dataset = TeacherDemonstrations(
+            files=[teacher_files[o] for o in order], T_context=teacher_context, **params)
         assert len(self._agent_dataset) == len(self._teacher_dataset)
         self._epoch_repeat = epoch_repeat
 
     def __len__(self):
         return len(self._pairs) * self._epoch_repeat
-    
+
     def __getitem__(self, index):
         if torch.is_tensor(index):
             index = index.tolist()
@@ -46,7 +54,7 @@ class AgentTeacherDataset(Dataset):
         np.random.seed()
         agent_pairs, agent_context = self._agent_dataset[a_i]
         teacher_context = self._teacher_dataset[t_i]
-        
+
         if self._agent_context:
             return teacher_context, agent_context, agent_pairs
         return teacher_context, agent_pairs
@@ -58,21 +66,24 @@ class PairedAgentTeacherDataset(Dataset):
         with open(os.path.join(self._root_dir, 'mappings_1_to_1.json'), 'r') as f:
             self._mapping = json.load(f)
         self._teacher_files = sorted(list(self._mapping.keys()))
-        self._teacher_files = [self._teacher_files[o] for o in split_files(len(self._teacher_files), split, mode)]
+        self._teacher_files = [self._teacher_files[o]
+                               for o in split_files(len(self._teacher_files), split, mode)]
 
         self._agent_dataset = AgentDemonstrations(files=[], **params)
         self._teacher_dataset = TeacherDemonstrations(files=[], **params)
 
     def __len__(self):
         return len(self._teacher_files)
-    
+
     def __getitem__(self, index):
         if torch.is_tensor(index):
             index = index.tolist()
         assert 0 <= index < len(self), "invalid index!"
 
-        teacher_traj = load_traj(os.path.join(self._root_dir, self._teacher_files[index]))
-        agent_traj = load_traj(os.path.join(self._root_dir, self._mapping[self._teacher_files[index]]))
+        teacher_traj = load_traj(os.path.join(
+            self._root_dir, self._teacher_files[index]))
+        agent_traj = load_traj(os.path.join(
+            self._root_dir, self._mapping[self._teacher_files[index]]))
         _, agent_context = self._agent_dataset.proc_traj(agent_traj)
         teacher_context = self._teacher_dataset.proc_traj(teacher_traj)
         return teacher_context, agent_context
@@ -80,8 +91,10 @@ class PairedAgentTeacherDataset(Dataset):
 
 class LabeledAgentTeacherDataset(PairedAgentTeacherDataset):
     def __init__(self, root_dir, ignore_actor=False, **params):
-        self._agent_dataset = AgentDemonstrations(os.path.join(root_dir, 'traj*_robot'), **params)
-        self._teacher_dataset = TeacherDemonstrations(os.path.join(root_dir, 'traj*_human'), **params)
+        self._agent_dataset = AgentDemonstrations(
+            os.path.join(root_dir, 'traj*_robot'), **params)
+        self._teacher_dataset = TeacherDemonstrations(
+            os.path.join(root_dir, 'traj*_human'), **params)
         self._ignore_actor = ignore_actor
 
     def __len__(self):
@@ -99,11 +112,12 @@ class LabeledAgentTeacherDataset(PairedAgentTeacherDataset):
         if self._ignore_actor == 'agent':
             ctx1, ctx2 = [self._teacher_dataset[index] for _ in range(2)]
         elif self._ignore_actor == 'teacher':
-            ctx1, ctx2  = [self._agent_dataset[index][1] for _ in range(2)]
+            ctx1, ctx2 = [self._agent_dataset[index][1] for _ in range(2)]
         else:
             if index < len(self._agent_dataset):
-                ctx1, ctx2  = [self._agent_dataset[index][1] for _ in range(2)]
+                ctx1, ctx2 = [self._agent_dataset[index][1] for _ in range(2)]
             else:
-                ctx1, ctx2  = [self._teacher_dataset[index - len(self._agent_dataset)] for _ in range(2)]
-        
+                ctx1, ctx2 = [self._teacher_dataset[index -
+                                                    len(self._agent_dataset)] for _ in range(2)]
+
         return ctx1, int(index < len(self._agent_dataset)), ctx2
